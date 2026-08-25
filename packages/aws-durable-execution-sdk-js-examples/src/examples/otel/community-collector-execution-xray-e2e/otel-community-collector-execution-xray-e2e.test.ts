@@ -106,13 +106,16 @@ createTests({
         expect(workflowSpan).toBeDefined();
         expect(workflowSpan!.attributes["durable.execution.arn"]).toBeDefined();
 
-        // Without an ambient or extracted upstream context, Invocation is a
-        // separate root rather than a child of Workflow.
+        // Without an ambient or extracted upstream context, a synthetic
+        // execution root anchors the trace. The Invocation span joins the
+        // execution trace and parents onto that root (it is not a child of the
+        // Workflow span, and not a parentless root).
         const invocationSpans = spans.filter((s) => s.name === "Invocation");
         expect(invocationSpans.length).toBeGreaterThan(0);
         for (const invocationSpan of invocationSpans) {
-          expect(invocationSpan.parentSpanId).toBeUndefined();
-          expect(invocationSpan.traceId).not.toBe(workflowSpan!.traceId);
+          expect(invocationSpan.parentSpanId).toBeDefined();
+          expect(invocationSpan.parentSpanId).not.toBe(workflowSpan!.spanId);
+          expect(invocationSpan.traceId).toBe(workflowSpan!.traceId);
           expect(
             invocationSpan.attributes["durable.execution.arn"],
           ).toBeDefined();

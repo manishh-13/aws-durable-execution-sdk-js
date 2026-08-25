@@ -39,6 +39,8 @@ describe("xRayContextExtractor", () => {
     expect(result).toEqual({
       traceId: "5759e988bd862e3fe1be46a994272793",
       parentSpanId: "53995c3f42cd8ad8",
+      sampling: "SAMPLED",
+      isExecutionStable: true,
     });
   });
 
@@ -50,6 +52,51 @@ describe("xRayContextExtractor", () => {
     expect(result).toEqual({
       traceId: "5759e988bd862e3fe1be46a994272793",
       parentSpanId: undefined,
+      sampling: "SAMPLED",
+      isExecutionStable: true,
+    });
+  });
+
+  it("maps Sampled=0 to NOT_SAMPLED", () => {
+    process.env._X_AMZN_TRACE_ID =
+      "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8;Sampled=0";
+
+    const result = xRayContextExtractor(baseInfo);
+    expect(result?.sampling).toBe("NOT_SAMPLED");
+  });
+
+  it("maps a missing Sampled field to UNDECIDED", () => {
+    process.env._X_AMZN_TRACE_ID =
+      "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=53995c3f42cd8ad8";
+
+    const result = xRayContextExtractor(baseInfo);
+    expect(result?.sampling).toBe("UNDECIDED");
+  });
+
+  it("maps an unusable Sampled value to UNDECIDED", () => {
+    process.env._X_AMZN_TRACE_ID =
+      "Root=1-5759e988-bd862e3fe1be46a994272793;Sampled=?";
+
+    const result = xRayContextExtractor(baseInfo);
+    expect(result?.sampling).toBe("UNDECIDED");
+  });
+
+  it("returns undefined for an all-zero Root (well-formed but invalid)", () => {
+    process.env._X_AMZN_TRACE_ID =
+      "Root=1-00000000-000000000000000000000000;Parent=53995c3f42cd8ad8;Sampled=1";
+    expect(xRayContextExtractor(baseInfo)).toBeUndefined();
+  });
+
+  it("treats an all-zero Parent as absent, keeping the valid Root", () => {
+    process.env._X_AMZN_TRACE_ID =
+      "Root=1-5759e988-bd862e3fe1be46a994272793;Parent=0000000000000000;Sampled=1";
+
+    const result = xRayContextExtractor(baseInfo);
+    expect(result).toEqual({
+      traceId: "5759e988bd862e3fe1be46a994272793",
+      parentSpanId: undefined,
+      sampling: "SAMPLED",
+      isExecutionStable: true,
     });
   });
 
@@ -82,6 +129,8 @@ describe("xRayContextExtractor", () => {
     expect(result).toEqual({
       traceId: "5759e988bd862e3fe1be46a994272793",
       parentSpanId: "53995c3f42cd8ad8",
+      sampling: "SAMPLED",
+      isExecutionStable: true,
     });
   });
 
@@ -93,6 +142,8 @@ describe("xRayContextExtractor", () => {
     expect(result).toEqual({
       traceId: "5759e988bd862e3fe1be46a994272793",
       parentSpanId: undefined,
+      sampling: "SAMPLED",
+      isExecutionStable: true,
     });
   });
 });
@@ -141,6 +192,7 @@ describe("w3cClientContextExtractor", () => {
       traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
       parentSpanId: "00f067aa0ba902b7",
       traceFlags: 1,
+      sampling: "SAMPLED",
     });
   });
 
@@ -159,6 +211,7 @@ describe("w3cClientContextExtractor", () => {
 
     const result = w3cClientContextExtractor(info);
     expect(result?.traceFlags).toBe(0);
+    expect(result?.sampling).toBe("NOT_SAMPLED");
   });
 
   it("returns undefined for traceparent with wrong number of parts", () => {
@@ -230,6 +283,41 @@ describe("w3cClientContextExtractor", () => {
           custom: {
             traceparent:
               "zz-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+          },
+        },
+      },
+    } as unknown as InvocationInfo;
+
+    expect(w3cClientContextExtractor(info)).toBeUndefined();
+  });
+
+  it("returns undefined for an all-zero traceId (well-formed but invalid)", () => {
+    // An all-zero trace ID is 32 hex chars but invalid per the W3C spec. It must
+    // be rejected so its sampled bit is not treated as authoritative when the
+    // resolver falls back to the ARN-derived trace.
+    const info = {
+      ...baseInfo,
+      context: {
+        clientContext: {
+          custom: {
+            traceparent:
+              "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+          },
+        },
+      },
+    } as unknown as InvocationInfo;
+
+    expect(w3cClientContextExtractor(info)).toBeUndefined();
+  });
+
+  it("returns undefined for an all-zero parentId (well-formed but invalid)", () => {
+    const info = {
+      ...baseInfo,
+      context: {
+        clientContext: {
+          custom: {
+            traceparent:
+              "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
           },
         },
       },

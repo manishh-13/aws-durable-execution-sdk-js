@@ -96,12 +96,16 @@ createTests({
         expect(workflowSpan!.attributes["durable.execution.arn"]).toBeDefined();
 
         // The Invocation span is invocation-rooted: it is NOT a child of the
-        // Workflow span. With no active parent span (community-collector local
-        // mode) it is a trace root. Execution correlation to the Workflow span
-        // is expressed via links on the operation/attempt spans instead.
+        // Workflow span. With no propagated context (community-collector local
+        // mode) a synthetic execution root anchors the trace, so the Invocation
+        // span parents onto that root and shares the execution trace. Execution
+        // correlation to the Workflow span is expressed via links on the
+        // operation/attempt spans instead.
         const invocationSpan = spans.find((s) => s.name === "Invocation");
         expect(invocationSpan).toBeDefined();
-        expect(invocationSpan!.parentSpanId).toBeUndefined();
+        expect(invocationSpan!.parentSpanId).toBeDefined();
+        expect(invocationSpan!.parentSpanId).not.toBe(workflowSpan!.spanId);
+        expect(invocationSpan!.traceId).toBe(workflowSpan!.traceId);
         // The Invocation span itself carries no links.
         expect(invocationSpan!.links).toHaveLength(0);
 
@@ -173,17 +177,21 @@ createTests({
           failsThenSucceedsSpan!.attributes["durable.operation.type"],
         ).toBe("STEP");
 
-        // Operations stay in their invocation trace. This workflow suspends and
-        // resumes, so multiple Invocation traces are expected and Workflow links
-        // provide execution-scoped correlation across them.
+        // The whole execution now shares one trace. This workflow suspends and
+        // resumes across multiple invocations, but every Invocation span and
+        // every operation span shares the single execution trace ID, and the
+        // Workflow links still provide execution-scoped correlation.
         const invocationTraceIds = new Set(
           spans
             .filter((span) => span.name === "Invocation")
             .map((span) => span.traceId),
         );
-        expect(invocationTraceIds.size).toBeGreaterThan(1);
+        expect(invocationTraceIds.size).toBe(1);
+        expect(invocationTraceIds.has(workflowSpan!.traceId)).toBe(true);
         expect(
-          operationSpans.every((span) => invocationTraceIds.has(span.traceId)),
+          operationSpans.every(
+            (span) => span.traceId === workflowSpan!.traceId,
+          ),
         ).toBe(true);
 
         // Verify inner-step is nested under child-operations

@@ -7,21 +7,21 @@ export function assertInvocationViewTraceTopology(
   expect(workflowSpans).toHaveLength(1);
 
   const workflowSpan = workflowSpans[0];
-  expect(workflowSpan.parentSpanId).toBeUndefined();
+  // The whole execution shares one trace, anchored at the execution ancestor.
+  // With no propagated context (local example runs), that ancestor is a
+  // synthetic execution root, so the Workflow span parents onto it rather than
+  // being a parentless root.
+  expect(workflowSpan.parentSpanId).toBeDefined();
   expect(workflowSpan.traceId).toMatch(/^[0-9a-f]{32}$/);
 
   const invocationSpans = spans.filter((span) => span.name === "Invocation");
   expect(invocationSpans.length).toBeGreaterThan(0);
 
-  const invocationTraceIds = new Set(
-    invocationSpans.map((span) => span.traceId),
+  // Every span — Workflow, Invocation, and the durable operation/attempt spans
+  // — shares the single execution trace.
+  expect(spans.every((span) => span.traceId === workflowSpan.traceId)).toBe(
+    true,
   );
-  expect(invocationTraceIds.has(workflowSpan.traceId)).toBe(false);
-
-  const invocationViewSpans = spans.filter((span) => span.name !== "Workflow");
-  expect(
-    invocationViewSpans.every((span) => invocationTraceIds.has(span.traceId)),
-  ).toBe(true);
 
   const durableOperationSpans = spans.filter(
     (span) => span.attributes["durable.operation.type"] !== undefined,
